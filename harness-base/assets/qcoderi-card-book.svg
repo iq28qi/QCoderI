@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="170" viewBox="0 0 300 170" fill="none">
+ <defs>
+  <linearGradient id="page" x1="90" y1="30" x2="207" y2="135" gradientUnits="userSpaceOnUse"><stop stop-color="#ead4ff" stop-opacity=".8"/><stop offset=".5" stop-color="#aa6ceb" stop-opacity=".7"/><stop offset="1" stop-color="#392355" stop-opacity=".8"/></linearGradient>
+  <linearGradient id="cover" x1="80" y1="80" x2="230" y2="145" gradientUnits="userSpaceOnUse"><stop stop-color="#8f4fc9"/><stop offset=".5" stop-color="#dba7ff"/><stop offset="1" stop-color="#4c2975"/></linearGradient>
+  <radialGradient id="halo"><stop stop-color="#b273ff" stop-opacity=".5"/><stop offset="1" stop-color="#a26aff" stop-opacity="0"/></radialGradient>
+  <filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="4"/></filter>
+ </defs>
+ <ellipse cx="160" cy="105" rx="124" ry="58" fill="url(#halo)"/>
+ <path d="m51 109 76 27 108-21-74-28-110 22Z" fill="#39204f" stroke="#bd82f5" stroke-opacity=".5"/>
+ <path d="m58 103 73 27 100-21 10-13-105 21-65-22-13 8Z" fill="url(#cover)"/>
+ <path d="m63 94 69 28 100-22-14-4-83 18-62-27-10 7Z" fill="#dcc3ff" fill-opacity=".6"/>
+ <path d="M132 116C111 92 89 93 60 80l29-51c23 15 51 21 63 44 22-19 51-20 84-32l-13 55c-37 7-61 13-91 20Z" fill="url(#page)" stroke="#d5aaff" stroke-width="1.2"/>
+ <path d="M133 116c6-16 9-29 19-43M67 80c27 12 49 17 66 36M78 62c21 10 45 16 61 34M87 45c19 12 39 18 57 36m8-8c26-13 48-15 76-26m-86 48c23-14 48-16 78-26m-83 36c23-13 49-15 80-24" stroke="#e1bfff" stroke-opacity=".52" stroke-width="1.2"/>
+ <path d="M131 116c-9-25-12-45-7-75 13 8 25 17 28 32 15-19 32-29 56-40-3 19-6 34-16 53" fill="url(#page)" fill-opacity=".7" stroke="#e2baff" stroke-opacity=".6"/>
+ <path d="m134 116 1 12" stroke="#f5dfff" stroke-width="3" filter="url(#glow)"/><path d="m134 113 1 13" stroke="#f8eaff" stroke-width="1.8"/>
+ <g fill="#e7c2ff"><circle cx="92" cy="16" r="1.5"/><circle cx="206" cy="26" r="1.3"/><circle cx="239" cy="71" r="1"/><circle cx="77" cy="116" r="1"/><path d="m180 15 2 6 6 2-6 2-2 6-2-6-6-2 6-2 2-6Z"/></g>
+</svg>

@@ -1,0 +1,8 @@
+{
+  "name": "@qcoderi/aether",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./index.js", "./bridge": "./bridge.js" },
+  "peerDependencies": { "@qcoderi/team": "0.1.0" }
+}

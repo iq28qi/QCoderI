@@ -1,0 +1,7 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {benchmarkRuntimeIdentity,assertBenchmarkReuse} from '../scripts/native-benchmark-identity.mjs';
+const base=()=>({files:[{path:'QCoderI.exe',sha256:'a',bytes:12},{path:'harness-base/source/dsh/index.js',sha256:'b',bytes:3},{path:'harness-base/app/resources/runtime/node/node.exe',sha256:'c',bytes:20},{path:'harness-base/native/desktop-server.mjs',sha256:'d',bytes:4},{path:'harness-base/assets/team/workbench.js',sha256:'e',bytes:5}]});
+const info=manifest=>({runtime_sha256:benchmarkRuntimeIdentity(manifest),exe_sha256:manifest.files.find(x=>x.path==='QCoderI.exe').sha256});
+test('native evidence rejects same EXE with changed runtime, node or server',()=>{const original=info(base());for(const index of [0,1,2,3]){const next=base();next.files[index].sha256='changed';assert.throws(()=>assertBenchmarkReuse(original,info(next)),/changed native runtime/);}assert.throws(()=>assertBenchmarkReuse({exe_sha256:'a'},original),/lacks runtime identity/);});
+test('native evidence preserves unchanged runtime despite manifest timestamps, unrelated sources or ordering',()=>{const initial=base(),next=base();next.created_at=123;next.files[4].sha256='source-only';next.files.reverse();assert.equal(benchmarkRuntimeIdentity(initial),benchmarkRuntimeIdentity(next));assert.doesNotThrow(()=>assertBenchmarkReuse(info(initial),info(next)));});

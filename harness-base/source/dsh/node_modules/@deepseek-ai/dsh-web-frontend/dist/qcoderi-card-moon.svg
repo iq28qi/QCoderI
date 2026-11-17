@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="170" viewBox="0 0 300 170" fill="none">
+ <defs>
+  <linearGradient id="moon" x1="224" y1="20" x2="167" y2="107" gradientUnits="userSpaceOnUse"><stop stop-color="#f4d9ff"/><stop offset=".55" stop-color="#c19bed"/><stop offset="1" stop-color="#6a3ba4"/></linearGradient>
+  <radialGradient id="halo"><stop stop-color="#b57cff" stop-opacity=".6"/><stop offset="1" stop-color="#8146d2" stop-opacity="0"/></radialGradient>
+  <linearGradient id="cloud" x1="150" y1="91" x2="150" y2="145" gradientUnits="userSpaceOnUse"><stop stop-color="#bf93ee" stop-opacity=".65"/><stop offset="1" stop-color="#442963" stop-opacity="0"/></linearGradient>
+  <filter id="soft"><feGaussianBlur stdDeviation="2"/></filter>
+ </defs>
+ <ellipse cx="189" cy="76" rx="101" ry="75" fill="url(#halo)"/>
+ <path d="M216 22a44 44 0 1 0 19 74 42 42 0 0 1-19-74Z" fill="url(#moon)" stroke="#ecd3ff" stroke-opacity=".65"/>
+ <path d="M88 118c-4-14 5-25 16-23 3-15 22-18 30-4 9-6 22-1 24 9 11-11 28-6 31 6 11-7 25-3 29 9 10-9 23-5 28 5 11-4 19 0 21 11H69c0-9 9-16 19-13Z" fill="url(#cloud)" filter="url(#soft)"/>
+ <path d="M100 113c0-10 14-15 20-7 2-9 16-13 22-2m30 6c7-10 22-4 23 4m23 4c6-6 17-6 21 2" stroke="#d2a9ff" stroke-opacity=".35" stroke-linecap="round"/>
+ <g fill="#e7c8ff"><path d="m140 39 2 6 6 2-6 2-2 6-2-6-6-2 6-2 2-6Z"/><circle cx="250" cy="54" r="1.5"/><circle cx="115" cy="74" r="1.1"/><circle cx="169" cy="23" r="1.2"/><circle cx="258" cy="97" r="1"/></g>
+</svg>

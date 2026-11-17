@@ -1,0 +1,8 @@
+{
+  "name": "@qcoderi/unreal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./index.js" },
+  "peerDependencies": { "@qcoderi/team": "0.1.0" }
+}

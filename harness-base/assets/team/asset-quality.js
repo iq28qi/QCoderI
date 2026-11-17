@@ -1,0 +1,197 @@
+/** Conservative technical gates. A completed Blender job is not a completed asset.
+ * Review pass is accepted only through a one-use host-minted capability after
+ * rehashing signed stored model/import records (asset-reviews.js). Never tool flags.
+ */
+import {createHash} from 'node:crypto';
+import {createReadStream} from 'node:fs';
+import {lstat, realpath} from 'node:fs/promises';
+import {parse, join} from 'node:path';
+import {normalizeAssetSpecification} from './asset-specification.js';
+import {consumeAssetReviewAcceptance} from './asset-reviews.js';
+
+export const QUALITY_STATUSES = Object.freeze(['pass', 'fail', 'pending', 'not_applicable']);
+const aggregate = gates => gates.some(g => g.status === 'fail') ? 'fail'
+  : gates.some(g => g.status === 'pending') ? 'pending' : 'pass';
+
+/** Hash actual bytes, not existence alone. Missing/zero-byte artifacts are explicit.
+ * Streaming avoids loading large .blend files into the Node heap. */
+export async function fingerprintArtifact(path, kind) {
+  const result = {kind, path};
+  try {
+    let part=parse(path).root;
+    for(const component of path.slice(part.length).split(/[\\/]/).filter(Boolean)) {
+      part=join(part,component);if((await lstat(part)).isSymbolicLink())return {...result,status:'fail',reason:'linked_artifact'};
+    }
+    const actual=await realpath(path);
+    const info = await lstat(path);
+    if(info.nlink!==1)return {...result,status:'fail',reason:'linked_artifact'};
+    if (!info.isFile() || info.size === 0) return {...result, status: 'fail', reason: 'missing_or_empty'};
+    const hash = createHash('sha256');
+    for await (const chunk of createReadStream(path)) hash.update(chunk);
+    const after = await lstat(path);
+    if ((await realpath(path))!==actual || after.isSymbolicLink() || after.nlink!==1 || after.ino!==info.ino || after.size !== info.size || after.mtimeMs !== info.mtimeMs) return {...result, status: 'fail', reason: 'changed_during_hash'};
+    return {...result, status: 'pass', bytes: info.size, sha256: hash.digest('hex')};
+  } catch (error) { return {...result, status: 'fail', reason: error.code ?? error.message}; }
+}
+
+export function buildAssetQualityReport({specification, inspection, run = {}, evidence = [], acceptance} = {}) {
+  const spec = normalizeAssetSpecification(specification);
+  const gates = [];
+  const gate = (id, required = true, note) => {
+    const result = {id, required, status: required ? 'pass' : 'not_applicable', defects: [], evidence: [], ...(note ? {note} : {})};
+    gates.push(result); return result;
+  };
+  const defect = (g, code, message, object, actual, expected) => {
+    g.status = 'fail';
+    g.defects.push({code, severity: 'error', message, ...(object ? {object} : {}),
+      ...(actual !== undefined ? {actual} : {}), ...(expected !== undefined ? {expected} : {})});
+  };
+  const pending = (g, reason) => { if (g.status !== 'fail') g.status = 'pending'; g.evidence.push({status: 'pending', reason}); };
+  const checkZero = (g, data, key, name, scope) => {
+    const value = data?.[key];
+    if (!Number.isFinite(value) || value < 0) pending(g, `${name}: ${scope}.${key} not measured`);
+    else if (value > 0) defect(g, `${scope}.${key}`, `${name}: ${value} ${key}`, name, value, 0);
+  };
+  const artifactGate = gate('run_artifacts');
+  artifactGate.evidence = evidence.map(item => ({...item}));
+  if (run.process_status === undefined) pending(artifactGate, 'Blender process result not supplied');
+  else if (run.process_status !== 'completed') defect(artifactGate, 'run.process_failed', 'Blender run did not complete successfully', undefined, run.process_status, 'completed');
+  if (run.verification_error) defect(artifactGate, 'run.verification_failed', run.verification_error);
+  for (const item of evidence) if (item.status !== 'pass') defect(artifactGate, 'artifact.unavailable', `${item.kind}: ${item.reason ?? 'not verified'}`, undefined, item.path);
+  for (const kind of ['scene', 'inspection', 'specification']) if (!evidence.some(e => e.kind === kind && e.status === 'pass')) pending(artifactGate, `${kind} fingerprint absent`);
+
+  const scope = gate('subject_scope');
+  const allObjects = Array.isArray(inspection?.objects) ? inspection.objects : [];
+  const subjects = spec.subjects ? allObjects.filter(o => spec.subjects.includes(o.name)) : allObjects.filter(o => !o.studio_helper);
+  if (!Array.isArray(inspection?.objects)) pending(scope, 'Scene inspection not available');
+  else {
+    if (spec.subjects) for (const name of spec.subjects) if (!subjects.some(o => o.name === name)) defect(scope, 'subject.missing', 'Specified mesh object was not audited', name);
+    if (!subjects.length) defect(scope, 'subject.empty', 'No mesh subjects were audited');
+  }
+  const measured = inspection?.technical_measurements?.schema_version === 1;
+  if (!measured) pending(scope, 'Version 1 technical measurements missing; legacy audit alone is insufficient');
+
+  const geometry = gate('geometry', true, 'Finite coordinates, area, loose geometry and duplicate faces; no intersection, thickness, retopology or artistic-quality claim.');
+  const manifold = gate('closed_manifold', spec.requirements.closed_manifold);
+  const scale = gate('applied_scale', spec.requirements.applied_scale);
+  const material = gate('materials', spec.requirements.materials, 'Checks assigned surfaces and referenced image availability, not material appearance.');
+  const uv = gate('uv_integrity', spec.requirements.uv, 'UV presence, finite coordinates and zero-area triangles only; overlap, texel density and seams require review.');
+  const requireBoundRig = spec.requirements.rig || spec.limits.max_bone_influences !== undefined;
+  const rigRequired = requireBoundRig || subjects.some(o => o.rig);
+  const rig = gate('rig_structure', rigRequired, 'Deform-bone weights only; correct poses are not inferred from weights.');
+  for (const obj of subjects) {
+    const name = obj.name;
+    if (!measured) { for (const g of [geometry, manifold, scale, material, uv, rig]) if (g.required) pending(g, `${name}: extended measurements missing`); continue; }
+    const measuredArea = inspection.technical_measurements.min_face_area_m2;
+    if (measuredArea !== spec.limits.min_face_area_m2) pending(geometry, `${name}: audit area threshold does not match this specification; rerun the audit`);
+    for (const stage of ['base', 'evaluated']) {
+      const data = obj.quality_geometry?.[stage];
+      if (!data || data.error) { pending(geometry, `${name}: ${stage} geometry unavailable${data?.error ? ': '+data.error : ''}`); if (manifold.required) pending(manifold, `${name}: ${stage} geometry unavailable`); continue; }
+      if (!Number.isFinite(data.vertices) || !Number.isFinite(data.faces)) pending(geometry, `${name}: ${stage} topology counts unavailable`);
+      else if (data.vertices === 0 || data.faces === 0) defect(geometry, 'geometry.empty', `${stage} mesh has no surface`, name);
+      for (const key of ['non_finite_vertices', 'non_finite_transform', 'degenerate_faces', 'loose_vertices', 'wire_edges', 'duplicate_faces']) checkZero(geometry, data, key, name, stage);
+      if (manifold.required) for (const key of ['non_manifold_edges', 'inconsistent_winding_edges']) checkZero(manifold, data, key, name, stage);
+    }
+    if (scale.required) {
+      if (!Array.isArray(obj.scale) || obj.scale.length !== 3 || obj.scale.some(n => !Number.isFinite(n))) pending(scale, `${name}: object scale unavailable`);
+      else if (obj.scale.some(n => Math.abs(n - 1) > 1e-4)) defect(scale, 'transform.unapplied_scale', 'Apply or explicitly waive scale before delivery', name, obj.scale, [1, 1, 1]);
+    }
+    if (material.required) {
+      checkZero(material, obj, 'unassigned_material_faces', name, 'material');
+      checkZero(material, obj, 'evaluated_unassigned_material_faces', name, 'material');
+      for (const key of ['quality_materials', 'evaluated_quality_materials']) {
+        const details = obj[key];
+        if (!details || !Array.isArray(details.defects) || !Array.isArray(details.pending)) pending(material, `${name}: ${key} connectivity not measured`);
+        else {
+          for (const issue of details.defects) defect(material, issue.code, issue.message, name, issue.actual);
+          for (const reason of details.pending) pending(material, `${name}: ${reason}`);
+        }
+      }
+    }
+    if (uv.required) {
+      const data = obj.quality_geometry?.evaluated;
+      if (!Number.isFinite(data?.uv_layers)) pending(uv, `${name}: evaluated UV layers unavailable`);
+      else if (data.uv_layers === 0) defect(uv, 'uv.missing', 'No evaluated UV layer', name);
+      else for (const key of ['non_finite_uvs', 'degenerate_uv_triangles']) checkZero(uv, data, key, name, 'uv');
+    }
+    if (rig.required) {
+      if (!obj.rig) { if (requireBoundRig) defect(rig, 'rig.missing', 'Required armature is not bound to mesh', name); }
+      else {
+        if (!Number.isFinite(obj.deform_bones)) pending(rig, `${name}: deform-bone count unavailable`);
+        else if (obj.deform_bones === 0) defect(rig, 'rig.no_deform_bones', 'Armature has no deform bones', name);
+        for (const key of ['unweighted_deform_vertices', 'invalid_bone_weights']) checkZero(rig, obj, key, name, 'rig');
+        if (spec.limits.max_bone_influences !== undefined) {
+          if (!Number.isFinite(obj.max_bone_influences)) pending(rig, `${name}: influences unavailable`);
+          else if (obj.max_bone_influences > spec.limits.max_bone_influences) defect(rig, 'rig.influence_budget', 'Too many deform-bone influences', name, obj.max_bone_influences, spec.limits.max_bone_influences);
+        }
+      }
+    }
+  }
+  if (!subjects.length) for (const g of [geometry, manifold, scale, material, uv, rig]) if (g.required) pending(g, 'No subject measurements');
+
+  const units = gate('units', !!spec.units);
+  if (units.required) {
+    const actual = inspection?.scene;
+    if (!actual || !Number.isFinite(actual.unit_scale)) pending(units, 'Scene units not measured');
+    else if (actual.units !== spec.units.system || Math.abs(actual.unit_scale - spec.units.meters_per_unit) > spec.units.meters_per_unit * 1e-6)
+      defect(units, 'units.mismatch', 'Scene unit settings differ from the contract; no automatic rescaling was performed', undefined,
+        {system: actual.units, meters_per_unit: actual.unit_scale}, spec.units);
+  }
+  const budget = gate('triangle_budget', spec.limits.max_triangles !== undefined);
+  if (budget.required) {
+    const counts = subjects.map(o => o.quality_geometry?.evaluated?.triangles);
+    if (!counts.length || counts.some(n => !Number.isFinite(n))) pending(budget, 'Evaluated triangle count unavailable');
+    else {
+      const total = counts.reduce((a,b) => a+b, 0); budget.evidence.push({evaluated_triangles: total});
+      if (total > spec.limits.max_triangles) defect(budget, 'geometry.triangle_budget', 'Evaluated subject triangle budget exceeded', undefined, total, spec.limits.max_triangles);
+    }
+  }
+  const dimensions = gate('dimensions', !!spec.limits.dimensions_m);
+  if (dimensions.required) {
+    const bounds = subjects.map(o => o.quality_geometry?.evaluated?.bounds_m);
+    if (!bounds.length || bounds.some(b => !b || !['min','max'].every(key => Array.isArray(b[key]) && b[key].length === 3 && b[key].every(Number.isFinite)))) pending(dimensions, 'World bounds in metres unavailable');
+    else {
+      const size = [0,1,2].map(i => Math.max(...bounds.map(b=>b.max[i])) - Math.min(...bounds.map(b=>b.min[i])));
+      dimensions.evidence.push({dimensions_m: size});
+      for (const [kind, limit] of Object.entries(spec.limits.dimensions_m)) if (size.some((n,i) => kind === 'min' ? n < limit[i] - 1e-7 : n > limit[i] + 1e-7))
+        defect(dimensions, `dimensions.${kind}`, 'Combined world-axis-aligned dimensions outside requested bounds', undefined, size, limit);
+    }
+  }
+  const technicalGates = [...gates];
+  const visual = gate('visual_review'); pending(visual, 'No run-bound visual review performed; saved scenes and images are only artifacts');
+  const reference = gate('reference_review', spec.requirements.reference); if (reference.required) pending(reference, 'Reference comparison has not been performed');
+  const animationRequired = spec.requirements.animation || (inspection?.scene?.actions?.length ?? 0) > 0;
+  const shapeKeysPresent = subjects.some(o => Array.isArray(o.shape_keys) && o.shape_keys.length > 1);
+  const deformation = gate('deformation_review', rigRequired || subjects.some(o => o.rig) || animationRequired || shapeKeysPresent);
+  if (deformation.required) pending(deformation, 'Extreme poses, frame changes, cycle seam and deformation quality have not been reviewed');
+  const animation = gate('animation_review', animationRequired);
+  if (animation.required) pending(animation, 'Animation playback, FPS, root motion and cycle/contact checks not performed');
+  const print = gate('printability', spec.purpose === 'print');
+  if (print.required) pending(print, 'Self-intersections, physical thickness and slicer validation not performed');
+  const exported = gate('export_validation');
+  pending(exported, 'No target-application import/round-trip validation performed; writing an export file alone does not pass this gate');
+  const verified = consumeAssetReviewAcceptance(acceptance, {run, specification: spec, inspection, evidence});
+  const appliedReviews=new Set();
+  if (verified) for (const result of verified) {
+    const g = gates.find(g => g.id === result.id);
+    if (!g?.required) continue;
+    // Conflicting/rejected records cannot be masked by a later pass.
+    if (!appliedReviews.has(g.id)) { g.status = result.status; g.evidence = []; appliedReviews.add(g.id); }
+    else if (result.status === 'fail' || g.status === 'fail') g.status = 'fail';
+    else if (result.status === 'pending' || g.status === 'pending') g.status = 'pending';
+    g.evidence.push({review_id: result.review_id, status: result.status, reasons: result.reasons});
+    if (result.status === 'fail') for (const reason of result.reasons)
+      defect(g, 'review.rejected', reason);
+  }
+  const status = aggregate(gates.filter(g => g.required));
+  const technicalStatus = aggregate(technicalGates.filter(g => g.required));
+  return {schema_version: 1, report_type: 'qcoderi.asset-quality', generated_at: new Date().toISOString(),
+    status, technical_status: technicalStatus, ready_for_export: status === 'pass' && technicalStatus === 'pass',
+    specification: spec, run, subjects: subjects.map(o => o.name), gates,
+    defects: gates.flatMap(g => g.defects.map(d => ({gate: g.id, ...d}))),
+    pending_checks: gates.filter(g => g.status === 'pending').map(g => g.id),
+    limitations: ['No automatic artistic correctness or retopology guarantee.',
+      'Reviews apply only to the exact rehashed stored evidence and selected model route; serialized quality.json is a historical snapshot, not current acceptance.',
+      'Static Blender reimport does not prove UE compatibility, skeletal animation, printability or artistic correctness.',
+      'Geometry diagnostics do not prove absence of self-intersections, sufficient thickness, UV quality or outward normals.']};
+}

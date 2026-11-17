@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+const jsx=(type,props)=>({type,props});
+const ctx=vm.createContext({react_jsx_runtime:{jsx,jsxs:jsx},ModelsSection_module_css_default:{}});
+vm.runInContext(readFileSync(new URL('../assets/image-input-editor.js',import.meta.url),'utf8'),ctx);
+let changed;
+ctx.args={model:{id:'gpt-6-astra',input:['text','image']},index:0,disabled:false,onChange:value=>{changed=value;}};
+const field=vm.runInContext('QcImageInputEditor(args)',ctx).props.children[1];
+assert.equal(field.props.value,'image');
+field.props.onChange({target:{value:'text'}});assert.equal(JSON.stringify(changed),'{"input":["text"]}');
+field.props.onChange({target:{value:'auto'}});assert.equal(changed.input,undefined);
+field.props.onChange({target:{value:'image'}});assert.equal(JSON.stringify(changed),'{"input":["text","image"]}');
+console.log('PASS: model image-input setting displays explicit capability, switches text/vision and clears to Auto');

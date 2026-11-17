@@ -1,0 +1,14 @@
+{
+  "name": "qcoderi",
+  "description": "QCoderI — настольный AI-агент на основе DeepSeek Harness",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/main.js",
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "semver": "^7.8.5"
+  },
+  "productName": "QCoderI"
+}

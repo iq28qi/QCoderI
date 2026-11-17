@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import {mkdtemp,writeFile,readFile,rm,symlink,mkdir} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {WorkspaceStore,inside,matchTerms,hash} from '../assets/team/workspace-store.js';
+import {DesktopSession} from '../assets/team/desktop-session.js';
+const root=await mkdtemp(join(tmpdir(),'qc-workbench-test-')),project=join(root,'project');await mkdir(project);
+try{
+  const store=new WorkspaceStore(join(root,'state'),project);
+  await store.remember({key:'style',kind:'preference',content:'Реалистичный стиль'},'Сделай реалистичный стиль');
+  assert((await new WorkspaceStore(join(root,'state'),project).context()).memory.includes('Реалистичный'));
+  await assert.rejects(store.remember({key:'x',kind:'preference',content:'y',revision:0},'source'),/изменилась/);
+  await store.term({term:'персонаж',definition:'Главный герой',aliases:['герой']});
+  assert.equal(matchTerms('этот герой', (await store.state()).dictionary).length,1);
+  assert.equal(matchTerms('геройский', (await store.state()).dictionary).length,0);
+  assert.equal(matchTerms('uthjq', (await store.state()).dictionary).length,1);
+  const state=await store.state();await store.forget(state.memory[0].id,state.revision);assert.equal((await store.context()).memory,'');
+  await assert.rejects(inside(project,'../outside'),/файл проекта/);await assert.rejects(inside(project,'.env'),/секретов/);
+  await writeFile(join(project,'a.txt'),'before');const checkpoint=await store.begin(['a.txt','new.txt'],'изменение');await writeFile(join(project,'a.txt'),'after');await writeFile(join(project,'new.txt'),'created');await store.finish(checkpoint);
+  assert.deepEqual((await store.diff(checkpoint.id,'a.txt')).before,'before');
+  await writeFile(join(project,'a.txt'),'human');let restored=await store.restore(checkpoint.id,'a.txt');assert.deepEqual(restored.conflicts,['a.txt']);assert.equal(await readFile(join(project,'a.txt'),'utf8'),'human');
+  await writeFile(join(project,'a.txt'),'after');await store.restore(checkpoint.id,'a.txt');assert.equal(await readFile(join(project,'a.txt'),'utf8'),'before');await store.restore(checkpoint.id,'a.txt','after');assert.equal(await readFile(join(project,'a.txt'),'utf8'),'after');
+  await store.restore(checkpoint.id,'new.txt');await assert.rejects(readFile(join(project,'new.txt')),/ENOENT/);
+  const binary=Buffer.from([1,2,0,4]);await writeFile(join(project,'scene.blend'),binary);const scene=await store.begin(['scene.blend'],'сцена');await writeFile(join(project,'scene.blend'),Buffer.from([4,0,5]));await store.finish(scene);assert.equal((await store.diff(scene.id,'scene.blend')).before,null);await store.restore(scene.id,'scene.blend');assert.deepEqual(await readFile(join(project,'scene.blend')),binary);
+  const original=await store.read('a.txt');await writeFile(join(project,'a.txt'),'external');await assert.rejects(store.save('a.txt','draft',original.hash),/Конфликт/);assert.equal(await readFile(join(project,'a.txt'),'utf8'),'external');const fresh=await store.read('a.txt');await store.save('a.txt','saved',fresh.hash);assert.equal(await readFile(join(project,'a.txt'),'utf8'),'saved');
+  const desktop=new DesktopSession(),signal=new AbortController().signal;const observation=desktop.observed('chat','123');desktop.require('chat','123',observation.id);assert.throws(()=>desktop.require('other','123',observation.id),/Устаревшее/);
+  let release,started;const start=new Promise(r=>started=r);const first=desktop.run(signal,async active=>{started();await new Promise(r=>release=r);active.throwIfAborted();});await start;const queued=desktop.run(signal,async()=>assert.fail('queued action must be rejected'));const results=Promise.allSettled([first,queued]);desktop.takeover();release();assert((await results).every(x=>x.status==='rejected'));await assert.rejects(desktop.run(signal,async()=>{}),/Управление/);desktop.resume();assert.equal(desktop.observation,null);
+  let active=0,peak=0;await Promise.all(Array.from({length:5},()=>desktop.run(signal,async()=>{active++;peak=Math.max(peak,active);await new Promise(r=>setTimeout(r,5));active--;})));assert.equal(peak,1);
+  console.log('PASS: project persistence/revisions, dictionary aliases/layout/boundaries, conflict-safe undo/redo, binary scene versions, editor disk conflicts, desktop ownership/stale observations/global queue');
+}finally{await rm(root,{recursive:true,force:true});}

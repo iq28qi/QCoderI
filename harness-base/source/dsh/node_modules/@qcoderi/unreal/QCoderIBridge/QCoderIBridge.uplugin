@@ -1,0 +1,12 @@
+{
+  "FileVersion": 3,
+  "Version": 3,
+  "VersionName": "0.3.0",
+  "FriendlyName": "QCoderI Blueprint Bridge",
+  "Description": "Local editor tools for QCoderI: meshes, textures, materials, scenes, UMG and Blueprint graphs.",
+  "Category": "Editor",
+  "CreatedBy": "QCoderI",
+  "CanContainContent": false,
+  "EnabledByDefault": false,
+  "Modules": [{ "Name": "QCoderIBridge", "Type": "Editor", "LoadingPhase": "PostEngineInit" }]
+}

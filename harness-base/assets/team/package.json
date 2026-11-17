@@ -1,0 +1,26 @@
+{
+  "name": "@qcoderi/team",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./chat": "./chat.js",
+    "./media": "./media.js",
+    "./screenshot": "./screenshot.js",
+    "./image-generation": "./image-generation.js",
+    "./desktop": "./desktop.js",
+    "./studio3d": "./studio3d.js",
+    "./workbench": "./workbench.js",
+    "./usage-provider-contract": "./usage-provider-contract.js",
+    "./binary-analysis": "./binary-analysis.js"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-commands": "^0.1.0-rc.22",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.22",
+    "@deepseek-ai/dsh-subagent": "^0.1.0-rc.22",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.22",
+    "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.22",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.22"
+  }
+}
