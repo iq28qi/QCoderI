@@ -204,6 +204,21 @@ test('scoped privacy covers vocabulary/cache/provenance, whole-file secrets, pri
   assert.deepEqual((await search(store, 'allowedConcept', { scope: ['src'] })).results, []);
 }));
 
+test('separate vocabulary terms do not form a synthetic bearer credential', () => fixture(async store => {
+  await put(store.cwd, 'reading.md', 'The bearer of this intercommunication manual waited.\n');
+  await put(store.cwd, 'sample.md', 'Bearer fixtureOpaque0123456789\n');
+
+  const indexed = await finish(store);
+  assert.equal(indexed.coverage.complete, true);
+  const saved = await payload(store);
+  assert.deepEqual(saved.files.map(file => file.path), ['reading.md'], 'actual bearer credentials are still excluded');
+  assert(saved.model.vocabulary.includes('bearer'));
+  assert(saved.model.vocabulary.includes('intercommunication'));
+  const result = await search({ ...store }, 'intercommunication');
+  assert.equal(result.cache, 'ready');
+  assert.deepEqual(result.results.map(hit => hit.path), ['reading.md']);
+}));
+
 test('chunk/byte limits and validation are explicit; rejected secret reads still consume batch budget', () => fixture(async store => {
   const padded = 'const password = "fixture";\n' + 'padding '.repeat(12000);
   await put(store.cwd, 'a.md', padded); await put(store.cwd, 'b.md', padded);

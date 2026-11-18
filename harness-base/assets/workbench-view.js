@@ -12,17 +12,18 @@ function WorkbenchPanel({sessionId,chatMode,onDictation}){
   const [brain,setBrain]=react.useState(null),[brainQuery,setBrainQuery]=react.useState('');
   const [budget,setBudget]=react.useState(null),[budgetMoney,setBudgetMoney]=react.useState('10'),[budgetTokens,setBudgetTokens]=react.useState('100000'),[budgetPrices,setBudgetPrices]=react.useState('[]'),[budgetScope,setBudgetScope]=react.useState('global');
   react.useLayoutEffect(()=>{
-    const root=document.querySelector('[data-qc-conversation]');
     let seat=null;
     const update=()=>{
       if(seat?.isConnected)return;
-      seat=[...((root??document).querySelectorAll('[data-qc-voice-seat]'))]
+      const root=document.querySelector('[data-qc-conversation]')??document;
+      seat=[...root.querySelectorAll('[data-qc-voice-seat]')]
         .find(element=>element.dataset.qcVoiceSeat===String(sessionId))??null;
       setVoiceSeat(seat);
     };
     update();
+    // The conversation itself can be replaced without a session change.
     const observer=new MutationObserver(update);
-    observer.observe(root??document.body,{childList:true,subtree:true});
+    observer.observe(document.body,{childList:true,subtree:true});
     return()=>observer.disconnect();
   },[sessionId]);
   const recordingRef=react.useRef(null),lifetime=react.useRef(null),version=react.useRef(0);

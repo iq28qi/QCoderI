@@ -274,9 +274,11 @@ function validate(ctx, data) {
   }
   if (chunks > BRAIN_LIMITS.chunks || bytes > BRAIN_LIMITS.sourceBytes) throw Error('Index budget exceeded');
   const m = data.model;
+  // Joining sorted terms can create a credential-like phrase absent from every source file.
   if (m !== null && (!keysOnly(m, 'method vocabulary idf basis dimensions documents retainedEnergy') || m.method !== METHOD
-    || !Array.isArray(m.vocabulary) || m.vocabulary.length > BRAIN_LIMITS.vocabulary || m.vocabulary.some(w => typeof w !== 'string' || !/^[\p{L}][\p{L}\p{N}]{1,63}$/u.test(w))
-    || new Set(m.vocabulary).size !== m.vocabulary.length || hasProjectSecret(m.vocabulary.join(' '))
+    || !Array.isArray(m.vocabulary) || m.vocabulary.length > BRAIN_LIMITS.vocabulary
+    || m.vocabulary.some(w => typeof w !== 'string' || !/^[\p{L}][\p{L}\p{N}]{1,63}$/u.test(w) || hasProjectSecret(w))
+    || new Set(m.vocabulary).size !== m.vocabulary.length
     || !Array.isArray(m.idf) || m.idf.length !== m.vocabulary.length || m.idf.some(n => !finite(n) || n < 1 || n > 10)
     || !Array.isArray(m.basis) || m.basis.length > BRAIN_LIMITS.dimensions
     || m.basis.some(axis => !Array.isArray(axis) || axis.length !== m.vocabulary.length || axis.some(n => !finite(n) || Math.abs(n) > 1.000001))

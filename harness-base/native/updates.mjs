@@ -39,9 +39,10 @@ async function readManifest(url) {
 function releaseFrom(manifest, url, key) {
   const { version, file, bytes, sha256, signature } = manifest;
   if (manifest.schema !== 1 || manifest.platform !== 'windows-x64' ||
-      !versionPattern.test(version) || typeof file !== 'string' ||
-      file !== `QCoderI-${version}-windows-x64.zip` ||
-      !Number.isSafeInteger(bytes) || bytes < 1 || bytes > maxArchive || !hashPattern.test(sha256) ||
+      typeof version !== 'string' || !versionPattern.test(version) ||
+      typeof file !== 'string' || file !== `QCoderI-${version}-windows-x64.zip` ||
+      !Number.isSafeInteger(bytes) || bytes < 1 || bytes > maxArchive ||
+      typeof sha256 !== 'string' || !hashPattern.test(sha256) ||
       typeof signature !== 'string' || !/^[A-Za-z0-9+/]{86}==$/.test(signature))
     throw Error('Неверный формат манифеста обновления.');
   const payload = Buffer.from(JSON.stringify([manifest.schema, manifest.platform, version, file, bytes, sha256]));

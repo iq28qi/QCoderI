@@ -4,14 +4,21 @@ import { resolve, join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { registerHooks } from 'node:module';
 
 const base=resolve(fileURLToPath(new URL('..',import.meta.url)));
 const archive=resolve(process.env.HARNESS_ARCHIVE??join(base,'source'));
 const moduleUrl=name=>pathToFileURL(join(archive,'dsh/node_modules',name)).href;
-const {createVideoRouting,createJournal}=await import(moduleUrl('@qcoderi/team/media.js'));
-const {createMediaLibrary}=await import(moduleUrl('@qcoderi/team/media-library.js'));
-const {createMediaOptions}=await import(moduleUrl('@qcoderi/team/media-options.js'));
-const {createMediaPlayback}=await import(moduleUrl('@qcoderi/team/media-playback.js'));
+// Test maintained modules by default; an explicit archive still tests the packaged modules.
+const team=process.env.HARNESS_ARCHIVE ? new URL('./',moduleUrl('@qcoderi/team/media.js')) : new URL('../assets/team/',import.meta.url);
+const hooks=process.env.HARNESS_ARCHIVE ? undefined : registerHooks({resolve(specifier,context,next){
+  if(specifier.startsWith('@deepseek-ai/')&&context.parentURL?.startsWith(team.href))return next(moduleUrl(specifier+'/lib/index.js'),context);
+  return next(specifier,context);
+}});
+const [{createVideoRouting,createJournal},{createMediaLibrary},{createMediaOptions},{createMediaPlayback}]=await (async()=>{
+  try {return await Promise.all(['media','media-library','media-options','media-playback'].map(name=>import(new URL(name+'.js',team).href)));}
+  finally {hooks?.deregister();}
+})();
 const {createUserMessage,markAgentLoopRequest}=await import(moduleUrl('@deepseek-ai/dsh-llm/lib/index.js'));
 const key='fixture-video-key';
 const catalog={data:[{id:'seedance-2.5'},{id:'kling-3.0-pro'}]};
@@ -25,7 +32,7 @@ function setup(handler,extra={}) {
   const ctx={settings:{get:()=>({providers:{niceai:{baseURL:'https://api.niceai.rest/v1',apiKeyEnv:'FIXTURE'}}})},credentials:{resolve:async()=>({value:key})}};
   const fetchImpl=async(url,init)=>{requests.push({url,init});assert.equal(init.headers.Authorization,'Bearer '+key);assert.equal(init.redirect,'error');const answer=await handler(new URL(url).pathname,init,requests);return new Response(JSON.stringify(answer.body??answer),{status:answer.http??200,headers:{'content-type':'application/json'}});};
   const journal={read:async id=>records.get(id),write:async(id,value)=>records.set(id,structuredClone(value))};
-  const middleware=createVideoRouting(ctx,{fetchImpl,journal,wait:async()=>{},pollMs:1,...extra});
+  const middleware=createVideoRouting(ctx,{fetchImpl,journal,mediaOptions:{get:async()=>({seconds:5})},wait:async()=>{},pollMs:1,...extra});
   return {middleware,records,requests,run:input=>collect(middleware(input,()=>assert.fail('video must not use the chat transport')))};
 }
 
@@ -217,6 +224,33 @@ test('cancellation stops polling and retry resumes the same upstream job',async(
   finished=true;input.signal=new AbortController().signal;
   assert.equal(failure(await fixture.run(input)).kind,'stop');
   assert.equal(fixture.requests.filter(request=>request.init.method==='POST').length,1);
+});
+
+test('cancellation while saving the submission intent leaves the same request safe to retry',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'qcoderi-video-before-post-'));
+  try {
+    const journal=createJournal(directory),controller=new AbortController();
+    let recordKey,posts=0;
+    const fixture=setup((path,init)=>{
+      init.signal.throwIfAborted(); // Like fetch, an already aborted request is never sent.
+      if(path.endsWith('/models'))return catalog;
+      if(init.method==='POST'){posts++;return{id:'video-fixture'};}
+      return completed;
+    },{journal:{...journal,async write(id,value){
+      await journal.write(id,value);
+      if(value.state==='submitting'){recordKey=id;controller.abort();}
+    }}});
+    const input=options();input.signal=controller.signal;
+    assert.equal(failure(await fixture.run(input)).kind,'aborted');
+    assert.equal(posts,0);
+    assert.ok(recordKey);
+    input.signal=new AbortController().signal;
+    const retry=failure(await fixture.run(input));
+    assert.equal(retry.kind,'stop',retry.failure?.message);
+    assert.equal(posts,1);
+    assert.equal((await journal.read(recordKey)).state,'completed');
+    assert.equal(fixture.requests.filter(request=>request.init.method==='POST').length,1);
+  } finally {await rm(directory,{recursive:true,force:true});}
 });
 
 test('failed jobs expose a useful error and reject unsafe result URLs',async()=>{

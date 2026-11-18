@@ -8,7 +8,7 @@ import { once } from 'node:events';
 import { test } from 'node:test';
 import { createUpdates } from '../native/updates.mjs';
 
-test('native updater validates manifests and archives and defers installation for active chats', async () => {
+test('native updater validates manifests and archives and defers installation for active chats', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'qcoderi-updates-'));
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const archive = Buffer.from('fixture archive body');
@@ -48,6 +48,18 @@ test('native updater validates manifests and archives and defers installation fo
     assert.equal((await updates.check()).phase, 'current');
     published = { ...manifest('1.2.0'), sha256: '0'.repeat(64) };
     assert.match((await updates.check()).message, /Подпись/);
+    await t.test('rejects a signed manifest with a non-string version', async () => {
+      published = manifest(['1.2.0']);
+      const result = await updates.check();
+      assert.equal(result.phase, 'error');
+      assert.match(result.message, /Неверный формат манифеста/);
+    });
+    await t.test('rejects a signed manifest with a non-string SHA-256 at check time', async () => {
+      published = manifest('1.2.0', [digest]);
+      const result = await updates.check();
+      assert.equal(result.phase, 'error');
+      assert.match(result.message, /Неверный формат манифеста/);
+    });
     published = manifest('1.2.0');
     assert.equal((await updates.check()).phase, 'available');
     busy = true;

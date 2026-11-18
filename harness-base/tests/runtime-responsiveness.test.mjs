@@ -8,12 +8,13 @@ const sidebar = readFileSync(new URL('../assets/studio-sidebar.js', import.meta.
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 function fixture(source, component, options = {}) {
-  const effects = [], layoutEffects = [], intervals = new Map(), listeners = new Map(), states = [];
+  const effects = [], layoutEffects = [], intervals = new Map(), listeners = new Map(), states = [], stateUpdates = [];
   let stateIndex = 0, sequence = 0, changes = 0;
   const document = {
     hidden: false,
-    querySelector: () => options.root ?? null,
-    querySelectorAll: () => [],
+    body: {},
+    querySelector: () => options.root?.() ?? null,
+    querySelectorAll: selector => options.root?.()?.querySelectorAll(selector) ?? [],
     addEventListener(name, fn) { listeners.set(name, fn); },
     removeEventListener(name, fn) { if (listeners.get(name) === fn) listeners.delete(name); },
   };
@@ -29,6 +30,7 @@ function fixture(source, component, options = {}) {
         const next = typeof value === 'function' ? value(states[index]) : value;
         if (next !== states[index]) changes++;
         states[index] = next;
+        stateUpdates.push(next);
       }];
     },
     useRef: initial => ({ current: initial }),
@@ -44,14 +46,14 @@ function fixture(source, component, options = {}) {
   };
   const render = vm.runInNewContext(source + '\n' + component, context);
   render({ sessionId: 'session-1', chatMode: false, wide: false });
-  return { document, effects, layoutEffects, intervals, listeners, states, changes: () => changes };
+  return { document, effects, layoutEffects, intervals, listeners, states, stateUpdates, changes: () => changes };
 }
 
 test('streamed DOM mutations reuse the connected microphone seat and replacement is discovered', () => {
   let seat = { isConnected: true, dataset: { qcVoiceSeat: 'session-1' } };
   let searches = 0, changed, disconnected = false;
   const root = { querySelectorAll() { searches++; return [seat]; } };
-  const ui = fixture(workbench, 'WorkbenchPanel', { root, MutationObserver: class {
+  const ui = fixture(workbench, 'WorkbenchPanel', { root: () => root, MutationObserver: class {
     constructor(callback) { changed = callback; }
     observe() {}
     disconnect() { disconnected = true; }
@@ -64,9 +66,28 @@ test('streamed DOM mutations reuse the connected microphone seat and replacement
   seat = { isConnected: true, dataset: { qcVoiceSeat: 'session-1' } };
   changed();
   assert.equal(searches, 2);
-  assert.equal(ui.states.at(-1), seat, 'portal moves to a replacement composer');
+  assert.equal(ui.stateUpdates.at(-1), seat, 'portal moves to a replacement composer');
   cleanup();
   assert.equal(disconnected, true);
+});
+
+test('dictation follows the composer after the entire conversation root is replaced', () => {
+  const first = { isConnected: true, dataset: { qcVoiceSeat: 'session-1' } };
+  const next = { isConnected: true, dataset: { qcVoiceSeat: 'session-1' } };
+  let root = { querySelectorAll: () => [first] };
+  let changed, target;
+  const ui = fixture(workbench, 'WorkbenchPanel', { root: () => root, MutationObserver: class {
+    constructor(callback) { changed = callback; }
+    observe(node) { target = node; }
+    disconnect() {}
+  } });
+  const cleanup = ui.layoutEffects[0]();
+  assert.equal(ui.stateUpdates.at(-1), first);
+  first.isConnected = false;
+  root = { querySelectorAll: () => [next] };
+  if (target === ui.document.body) changed();
+  assert.equal(ui.stateUpdates.at(-1), next, 'observe a stable ancestor and rescan the current root');
+  cleanup();
 });
 
 test('workbench polling coalesces slow requests, pauses hidden and refreshes on return', async () => {
